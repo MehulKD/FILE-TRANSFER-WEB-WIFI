@@ -1,0 +1,18 @@
+# On Linux, host networking makes the container share the host's network
+# stack directly — this is the simplest option, and it's what makes the
+# app's own "Network: http://<ip>:8080" startup message accurate.
+#
+# Docker Desktop on macOS and Windows does NOT support real host
+# networking, so on those platforms comment out "network_mode: host" and
+# uncomment the "ports:" block instead — see the README's Docker section.
+
+services:
+  lan-file-transfer:
+    build: .
+    container_name: lan-file-transfer
+    network_mode: host
+    # ports:
+    #   - "8080:8080"
+    volumes:
+      - ./uploads:/app/uploads
+    restart: unless-stopped
