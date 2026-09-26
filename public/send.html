@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Send Files</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div>
+        <h1>📤 Send</h1>
+        <div class="subtitle">Pick photos & videos to upload</div>
+      </div>
+      <span class="status-pill" id="statusPill"><span class="dot" id="statusDot"></span><span id="statusText">Checking…</span></span>
+    </header>
+
+    <label class="dropzone" id="dropzone">
+      <div class="icon">🖼️</div>
+      <p><strong>Tap to choose photos or videos</strong></p>
+      <p>You can select multiple files at once</p>
+      <input type="file" id="fileInput" accept="image/*,video/*" multiple>
+    </label>
+
+    <div id="selectedSection" style="display:none;">
+      <div class="section-label" id="selectedLabel">Selected</div>
+      <div class="list" id="selectedList"></div>
+
+      <div id="formatOptions" style="margin-top:18px; display:flex; flex-direction:column; gap:12px;">
+        <div id="imageFormatRow" style="display:none;">
+          <label class="format-label" for="imageFormatSelect">Photos</label>
+          <select id="imageFormatSelect" class="format-select">
+            <option value="original">Keep original format</option>
+            <option value="jpeg">Convert to JPEG</option>
+            <option value="png">Convert to PNG</option>
+            <option value="webp">Convert to WEBP</option>
+          </select>
+        </div>
+        <div id="videoFormatRow" style="display:none;">
+          <label class="format-label" for="videoFormatSelect">Videos</label>
+          <select id="videoFormatSelect" class="format-select">
+            <option value="original">Keep original format</option>
+            <option value="mp4">Convert to MP4 (H.264)</option>
+            <option value="webm">Convert to WEBM</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="progress-track" id="progressTrack" style="display:none;">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <p class="subtitle" id="processingNote" style="display:none; text-align:center; margin-top:8px;">
+        Processing on the server (converting / building previews)… this can take a moment for videos.
+      </p>
+
+      <div style="display:flex; gap:10px; margin-top:16px;">
+        <button class="btn-primary" id="uploadBtn" style="flex:1;">Upload</button>
+        <button class="btn-secondary" id="clearBtn">Clear</button>
+      </div>
+    </div>
+
+    <div id="doneMsg" style="display:none; margin-top:18px;" class="status-pill">
+      <span class="dot on"></span><span id="doneText"></span>
+    </div>
+
+    <p class="subtitle" style="margin-top:28px; text-align:center;">
+      <a href="/receive.html" style="color:inherit;">Go to receive page →</a>
+    </p>
+  </div>
+
+<script>
+const fileInput = document.getElementById('fileInput');
+const dropzone = document.getElementById('dropzone');
+const selectedSection = document.getElementById('selectedSection');
+const selectedList = document.getElementById('selectedList');
+const selectedLabel = document.getElementById('selectedLabel');
+const uploadBtn = document.getElementById('uploadBtn');
+const clearBtn = document.getElementById('clearBtn');
+const progressTrack = document.getElementById('progressTrack');
+const progressFill = document.getElementById('progressFill');
+const doneMsg = document.getElementById('doneMsg');
+const doneText = document.getElementById('doneText');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const imageFormatRow = document.getElementById('imageFormatRow');
+const videoFormatRow = document.getElementById('videoFormatRow');
+const imageFormatSelect = document.getElementById('imageFormatSelect');
+const videoFormatSelect = document.getElementById('videoFormatSelect');
+const processingNote = document.getElementById('processingNote');
+
+let selectedFiles = [];
+
+function isVideoFile(file) {
+  return file.type.startsWith('video/') || /\.(mov|mp4|m4v|webm|mkv|avi|wmv|flv|mpg|mpeg|3gp|3g2|ogv|ts|m2ts|mts|qt)$/i.test(file.name);
+}
+function isImageFile(file) {
+  return !isVideoFile(file) && (file.type.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp|tiff?|heic|heif|avif|svg|dng|cr2|cr3|nef|arw|raf|orf|rw2)$/i.test(file.name));
+}
+
+/** Some formats (HEIC, RAW, MKV...) won't preview locally in every browser — fall back to an icon rather than a broken image. */
+function handleThumbError(img, icon) {
+  const div = document.createElement('div');
+  div.className = 'thumb-icon';
+  div.textContent = icon;
+  img.replaceWith(div);
+}
+
+function fmtBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  const units = ['KB', 'MB', 'GB'];
+  let val = bytes / 1024, i = 0;
+  while (val >= 1024 && i < units.length - 1) { val /= 1024; i++; }
+  return val.toFixed(1) + ' ' + units[i];
+}
+
+function renderSelected() {
+  selectedSection.style.display = selectedFiles.length ? 'block' : 'none';
+  selectedLabel.textContent = `Selected (${selectedFiles.length})`;
+  selectedList.innerHTML = '';
+
+  let hasImage = false;
+  let hasVideo = false;
+
+  selectedFiles.forEach((file, idx) => {
+    const video = isVideoFile(file);
+    const image = !video && isImageFile(file);
+    if (video) hasVideo = true;
+    if (image) hasImage = true;
+
+    const row = document.createElement('div');
+    row.className = 'file-card';
+    const icon = video ? '🎬' : image ? '🖼️' : '📄';
+    const thumbHtml = image
+      ? `<img class="thumb" src="${URL.createObjectURL(file)}" onerror="handleThumbError(this,'${icon}')">`
+      : `<div class="thumb-icon">${icon}</div>`;
+    row.innerHTML = `
+      ${thumbHtml}
+      <div class="meta">
+        <div class="name">${file.name}</div>
+        <div class="sub">${fmtBytes(file.size)}</div>
+      </div>
+      <button class="remove-btn" data-idx="${idx}">✕</button>
+    `;
+    selectedList.appendChild(row);
+  });
+
+  imageFormatRow.style.display = hasImage ? 'block' : 'none';
+  videoFormatRow.style.display = hasVideo ? 'block' : 'none';
+
+  selectedList.querySelectorAll('.remove-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      selectedFiles.splice(Number(btn.dataset.idx), 1);
+      renderSelected();
+    });
+  });
+}
+
+fileInput.addEventListener('change', () => {
+  selectedFiles = selectedFiles.concat(Array.from(fileInput.files));
+  fileInput.value = '';
+  doneMsg.style.display = 'none';
+  renderSelected();
+});
+
+clearBtn.addEventListener('click', () => {
+  selectedFiles = [];
+  renderSelected();
+});
+
+uploadBtn.addEventListener('click', () => {
+  if (!selectedFiles.length) return;
+  const formData = new FormData();
+  selectedFiles.forEach((f) => formData.append('files', f, f.name));
+  formData.append('imageFormat', imageFormatSelect.value);
+  formData.append('videoFormat', videoFormatSelect.value);
+
+  uploadBtn.disabled = true;
+  uploadBtn.textContent = 'Uploading…';
+  progressTrack.style.display = 'block';
+  progressFill.style.width = '0%';
+  processingNote.style.display = 'none';
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/upload');
+  xhr.upload.addEventListener('progress', (e) => {
+    if (e.lengthComputable) {
+      const pct = Math.round((e.loaded / e.total) * 100);
+      progressFill.style.width = pct + '%';
+    }
+  });
+  xhr.upload.addEventListener('load', () => {
+    // Network transfer is done; the server may still be converting
+    // files and building thumbnails before it responds.
+    uploadBtn.textContent = 'Processing…';
+    processingNote.style.display = 'block';
+  });
+  xhr.onload = () => {
+    uploadBtn.disabled = false;
+    uploadBtn.textContent = 'Upload';
+    progressTrack.style.display = 'none';
+    processingNote.style.display = 'none';
+    if (xhr.status >= 200 && xhr.status < 300) {
+      const count = selectedFiles.length;
+      selectedFiles = [];
+      renderSelected();
+      doneText.textContent = `${count} file${count === 1 ? '' : 's'} sent — check the receiving device`;
+      doneMsg.style.display = 'inline-flex';
+    } else {
+      alert('Upload failed: ' + xhr.responseText);
+    }
+  };
+  xhr.onerror = () => {
+    uploadBtn.disabled = false;
+    uploadBtn.textContent = 'Upload';
+    progressTrack.style.display = 'none';
+    processingNote.style.display = 'none';
+    alert('Upload failed — check that you are on the same WiFi network as the server.');
+  };
+  xhr.send(formData);
+});
+
+async function checkConnection() {
+  try {
+    const res = await fetch('/api/files', { cache: 'no-store' });
+    if (res.ok) {
+      statusDot.className = 'dot on';
+      statusText.textContent = 'Connected';
+      return;
+    }
+    throw new Error('bad status');
+  } catch {
+    statusDot.className = 'dot off';
+    statusText.textContent = 'Offline';
+  }
+}
+checkConnection();
+setInterval(checkConnection, 5000);
+</script>
+</body>
+</html>

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Receive Files</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div>
+        <h1>📥 Receive</h1>
+        <div class="subtitle" id="countLabel">Waiting for files…</div>
+      </div>
+      <span class="status-pill" id="statusPill"><span class="dot" id="statusDot"></span><span id="statusText">Connecting…</span></span>
+    </header>
+
+    <div id="listWrap"></div>
+
+    <p class="subtitle" style="margin-top:28px; text-align:center;">
+      <a href="/send.html" style="color:inherit;">Go to send page →</a>
+    </p>
+  </div>
+
+<script>
+const listWrap = document.getElementById('listWrap');
+const countLabel = document.getElementById('countLabel');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+
+let files = [];
+let ws;
+let reconnectDelay = 1000;
+
+function fmtBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  const units = ['KB', 'MB', 'GB'];
+  let val = bytes / 1024, i = 0;
+  while (val >= 1024 && i < units.length - 1) { val /= 1024; i++; }
+  return val.toFixed(1) + ' ' + units[i];
+}
+
+function timeAgo(ts) {
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (s < 5) return 'just now';
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  return `${h}h ago`;
+}
+
+function iconFor(kind) {
+  if (kind === 'video') return '🎬';
+  if (kind === 'image') return '🖼️';
+  return '📄';
+}
+
+/** Thumbnail failed to load (e.g. server couldn't decode an exotic format) — fall back once to the original file, then to an icon. */
+function handleThumbError(img, kind) {
+  const fallbackUrl = img.dataset.fallbackUrl;
+  if (fallbackUrl && img.src !== new URL(fallbackUrl, location.href).href) {
+    img.src = fallbackUrl;
+    return;
+  }
+  const div = document.createElement('div');
+  div.className = 'thumb-icon';
+  div.textContent = iconFor(kind);
+  img.replaceWith(div);
+}
+
+function render() {
+  countLabel.textContent = files.length
+    ? `${files.length} file${files.length === 1 ? '' : 's'} received`
+    : 'Waiting for files…';
+
+  if (!files.length) {
+    listWrap.innerHTML = `<div class="empty-state">Nothing here yet.<br>Files will appear automatically as they're sent.</div>`;
+    return;
+  }
+
+  listWrap.innerHTML = `<div class="list" id="list"></div>`;
+  const list = document.getElementById('list');
+  files.forEach((f) => {
+    const row = document.createElement('div');
+    row.className = 'list-item';
+    let thumb;
+    if (f.thumbUrl) {
+      const fallback = f.kind === 'image' && f.webSafe ? f.url : '';
+      thumb = `<img class="thumb" src="${f.thumbUrl}" data-fallback-url="${fallback}" loading="lazy" onerror="handleThumbError(this,'${f.kind}')">`;
+    } else if (f.kind === 'image' && f.webSafe) {
+      thumb = `<img class="thumb" src="${f.url}" loading="lazy" onerror="handleThumbError(this,'${f.kind}')">`;
+    } else {
+      thumb = `<div class="thumb-icon">${iconFor(f.kind)}</div>`;
+    }
+    row.innerHTML = `
+      ${thumb}
+      <div class="meta">
+        <div class="name">${f.name}</div>
+        <div class="sub">${fmtBytes(f.size)} · ${timeAgo(f.uploadedAt)}</div>
+      </div>
+      <a class="button btn-secondary" href="${f.url}" download="${f.name}">Save</a>
+    `;
+    listWrap.querySelector('#list').appendChild(row);
+  });
+}
+
+function upsertFiles(newFiles) {
+  const byName = new Map(files.map((f) => [f.name, f]));
+  newFiles.forEach((f) => byName.set(f.name, f));
+  files = Array.from(byName.values()).sort((a, b) => b.uploadedAt - a.uploadedAt);
+  render();
+}
+
+function removeFile(name) {
+  files = files.filter((f) => f.name !== name);
+  render();
+}
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onopen = () => {
+    statusDot.className = 'dot on';
+    statusText.textContent = 'Live';
+    reconnectDelay = 1000;
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'init') {
+      files = msg.files;
+      render();
+    } else if (msg.type === 'files-added') {
+      upsertFiles(msg.files);
+    } else if (msg.type === 'file-removed') {
+      removeFile(msg.name);
+    }
+  };
+
+  ws.onclose = () => {
+    statusDot.className = 'dot off';
+    statusText.textContent = 'Reconnecting…';
+    setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+// Refresh "time ago" labels periodically without waiting for new events.
+setInterval(render, 30000);
+
+render();
+connect();
+</script>
+</body>
+</html>
