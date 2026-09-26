@@ -72,7 +72,67 @@ and the server machine's CPU.
   cellular data, and not a guest network that isolates devices from each
   other — see Troubleshooting below).
 
-## Setup
+## Running with Docker
+
+A `Dockerfile` and `docker-compose.yml` are included. The one thing that
+differs from a plain `npm start` is **how the container reaches your LAN**,
+so read the note for your OS below.
+
+### Linux (recommended: host networking)
+
+On Linux, Docker can share the host machine's network stack directly, so
+the container behaves exactly like running `npm start` locally — including
+the startup log printing the correct LAN IP.
+
+```bash
+docker compose up --build
+```
+
+That's it — the `docker-compose.yml` here is already set to
+`network_mode: host`. Or without compose:
+
+```bash
+docker build -t lan-file-transfer .
+docker run --rm -it --network host -v "$(pwd)/uploads:/app/uploads" lan-file-transfer
+```
+
+### macOS / Windows (Docker Desktop)
+
+Docker Desktop on macOS and Windows doesn't support real host networking,
+so you publish the port instead and disregard the IP the app prints inside
+the container (that's the container's internal Docker network address, not
+your Mac/PC's WiFi address).
+
+1. Edit `docker-compose.yml`: comment out `network_mode: host` and
+   uncomment the `ports: ["8080:8080"]` lines. Or skip compose and run:
+
+   ```bash
+   docker build -t lan-file-transfer .
+   docker run --rm -it -p 8080:8080 -v "$(pwd)/uploads:/app/uploads" lan-file-transfer
+   ```
+
+2. Find your computer's own LAN IP the same way as in the non-Docker setup:
+   - **macOS**: `ipconfig getifaddr en0`
+   - **Windows**: `ipconfig` → "IPv4 Address" under your WiFi adapter
+
+3. On both phones, open `http://<that-ip>:8080` — the published port
+   forwards straight into the container.
+
+### Notes for either platform
+
+- `-v "$(pwd)/uploads:/app/uploads"` (or the `volumes:` line in compose)
+  keeps uploaded files and their thumbnails on your host filesystem, so
+  they survive `docker compose down` / container restarts and are easy to
+  grab directly from the host if needed.
+- `docker build` needs internet access once, to install dependencies
+  (including the `sharp`/`ffmpeg` native binaries) — after that, running
+  the container itself is fully offline/LAN-only like the rest of the app.
+- To change the port, set `PORT` as a build/run-time env var and update the
+  published port to match, e.g. `docker run -e PORT=3000 -p 3000:3000 ...`.
+- Stop the app with `docker compose down` (or `Ctrl+C` / `docker stop` for
+  a plain `docker run`).
+
+## Running directly with Node.js (no Docker)
 
 1. Copy this folder onto the computer that will act as the server.
 2. Open a terminal in the folder and install dependencies:
